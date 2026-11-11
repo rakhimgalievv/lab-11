@@ -1,0 +1,182 @@
+const { useEffect, useMemo, useState } = React;
+
+const INITIAL_EXPENSES = [
+  { id: 1, title: "Продукты", category: "Еда", amount: 8500, date: "2026-11-10" },
+  { id: 2, title: "Проезд", category: "Транспорт", amount: 1200, date: "2026-11-09" },
+  { id: 3, title: "Подписка", category: "Развлечения", amount: 2990, date: "2026-11-08" }
+];
+const CATEGORIES = ["Еда", "Транспорт", "Учёба", "Развлечения", "Покупки", "Другое"];
+const money = value => new Intl.NumberFormat("ru-RU").format(value) + " ₸";
+
+function Header({ level, onLevelChange }) {
+  return <header className="topbar">
+    <a className="brand" href="#"><span className="brand-mark">₸</span><span>Expense<span className="brand-accent">Flow</span></span></a>
+    <div className="level-switch" aria-label="Уровень сложности">
+      {["easy", "medium", "hard"].map((key, i) =>
+        <button key={key} className={level === key ? "level active" : "level"} onClick={() => onLevelChange(key)}>
+          {["Лёгкий", "Средний", "Высокий"][i]}
+        </button>
+      )}
+    </div>
+  </header>;
+}
+
+function StatCard({ label, value, hint, icon, accent }) {
+  return <article className={`stat-card ${accent || ""}`}>
+    <div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div>
+    <strong>{value}</strong><small>{hint}</small>
+  </article>;
+}
+
+function ExpenseForm({ onAdd, advanced }) {
+  const [title, setTitle] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState("Еда");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [error, setError] = useState("");
+
+  function submit(e) {
+    e.preventDefault();
+    const value = Number(amount);
+    if (!title.trim()) return setError("Введите название расхода.");
+    if (!Number.isFinite(value) || value <= 0) return setError("Сумма должна быть больше нуля.");
+    onAdd({ title: title.trim(), amount: value, category: advanced ? category : "Другое", date: advanced ? date : new Date().toISOString().slice(0, 10) });
+    setTitle(""); setAmount(""); setError("");
+  }
+
+  return <form className="panel form-panel" onSubmit={submit}>
+    <div className="panel-heading"><div><p className="eyebrow">НОВАЯ ЗАПИСЬ</p><h2>Добавить расход</h2></div><span className="heading-icon">＋</span></div>
+    <label>Название расхода<input value={title} onChange={e => setTitle(e.target.value)} placeholder="Например, обед" maxLength="48" /></label>
+    <div className="form-row">
+      <label>Сумма, ₸<input type="number" min="1" step="1" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" /></label>
+      {advanced && <label>Категория<select value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></label>}
+    </div>
+    {advanced && <label>Дата<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>}
+    {error && <p className="error">{error}</p>}
+    <button className="primary-btn" type="submit">Добавить расход <span>↗</span></button>
+  </form>;
+}
+
+function ExpenseItem({ expense, onDelete, onEdit, editable }) {
+  const symbols = { "Еда": "🍜", "Транспорт": "🚕", "Учёба": "📚", "Развлечения": "🎮", "Покупки": "🛍️", "Другое": "◈" };
+  return <div className="expense-row">
+    <div className="expense-symbol">{symbols[expense.category] || "◈"}</div>
+    <div className="expense-info"><strong>{expense.title}</strong><span>{expense.category} · {expense.date}</span></div>
+    <strong className="expense-amount">−{money(expense.amount)}</strong>
+    {editable && <button className="icon-btn" title="Изменить сумму" onClick={() => onEdit(expense)}>✎</button>}
+    <button className="icon-btn delete" title="Удалить расход" onClick={() => onDelete(expense.id)}>×</button>
+  </div>;
+}
+
+function ExpenseList({ expenses, onDelete, onEdit, editable }) {
+  if (!expenses.length) return <div className="empty"><span>⌕</span><strong>Пока ничего нет</strong><small>Добавьте первый расход или измените фильтр.</small></div>;
+  return <div className="expense-list">{expenses.map(item =>
+    <ExpenseItem key={item.id} expense={item} onDelete={onDelete} onEdit={onEdit} editable={editable} />
+  )}</div>;
+}
+
+function FilterBar({ search, onSearch, category, onCategory, sort, onSort }) {
+  return <div className="filters">
+    <input aria-label="Поиск" value={search} onChange={e => onSearch(e.target.value)} placeholder="⌕  Поиск расхода..." />
+    <select value={category} onChange={e => onCategory(e.target.value)}>
+      <option value="Все">Все категории</option>{CATEGORIES.map(c => <option key={c}>{c}</option>)}
+    </select>
+    <select value={sort} onChange={e => onSort(e.target.value)}>
+      <option value="new">Сначала новые</option><option value="high">Сначала дорогие</option><option value="low">Сначала дешёвые</option>
+    </select>
+  </div>;
+}
+
+function App() {
+  const [level, setLevel] = useState("easy");
+  const [expenses, setExpenses] = useState(() => {
+    try { const saved = localStorage.getItem("lab11-expenses"); return saved ? JSON.parse(saved) : INITIAL_EXPENSES; }
+    catch { return INITIAL_EXPENSES; }
+  });
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("Все");
+  const [sort, setSort] = useState("new");
+  const [budget, setBudget] = useState(100000);
+  const [editing, setEditing] = useState(null);
+
+  useEffect(() => { localStorage.setItem("lab11-expenses", JSON.stringify(expenses)); }, [expenses]);
+
+  const total = expenses.reduce((sum, item) => sum + item.amount, 0);
+  const average = expenses.length ? Math.round(total / expenses.length) : 0;
+  const filtered = useMemo(() => {
+    let result = [...expenses];
+    if (level !== "easy") {
+      result = result.filter(x => x.title.toLowerCase().includes(search.toLowerCase()));
+      if (category !== "Все") result = result.filter(x => x.category === category);
+      if (sort === "high") result.sort((a,b) => b.amount-a.amount);
+      else if (sort === "low") result.sort((a,b) => a.amount-b.amount);
+      else result.sort((a,b) => b.date.localeCompare(a.date) || b.id-a.id);
+    } else result.sort((a,b) => b.id-a.id);
+    return result;
+  }, [expenses, search, category, sort, level]);
+
+  function addExpense(data) {
+    setExpenses(prev => [{ ...data, id: Date.now() }, ...prev]);
+  }
+  function deleteExpense(id) { setExpenses(prev => prev.filter(x => x.id !== id)); }
+  function editExpense(item) {
+    const next = prompt(`Новая сумма для «${item.title}»:`, String(item.amount));
+    if (next === null) return;
+    const value = Number(next);
+    if (!Number.isFinite(value) || value <= 0) return alert("Введите корректную сумму больше нуля.");
+    setExpenses(prev => prev.map(x => x.id === item.id ? { ...x, amount: value } : x));
+  }
+  function resetDemo() {
+    if (confirm("Вернуть демонстрационные данные?")) { setExpenses(INITIAL_EXPENSES); setSearch(""); setCategory("Все"); }
+  }
+
+  const advanced = level !== "easy";
+  const hard = level === "hard";
+  const percent = Math.min(100, budget ? total / budget * 100 : 0);
+
+  return <div className="app-shell">
+    <Header level={level} onLevelChange={setLevel} />
+    <main>
+      <section className="hero">
+        <div><p className="eyebrow">ЛАБОРАТОРНАЯ РАБОТА № 11 · REACT</p>
+          <h1>Держи расходы<br/><span>под контролем.</span></h1>
+          <p className="hero-copy">Наглядный учёт трат на React. Добавляй записи, анализируй бюджет и управляй данными.</p>
+          <div className="hero-tags"><span>● React useState</span><span>● Props</span><span>● LocalStorage</span></div>
+        </div>
+        <div className="hero-art"><div className="orb orb-one"></div><div className="orb orb-two"></div><div className="mini-card"><span>ОБЩИЕ РАСХОДЫ</span><strong>{money(total)}</strong><small>Текущий список</small><div className="mini-line"><i></i></div></div><div className="floating">↗</div></div>
+      </section>
+
+      <section className="stats-grid">
+        <StatCard label="Всего потрачено" value={money(total)} hint="Сумма всех записей" icon="↗" accent="stat-purple"/>
+        <StatCard label="Количество трат" value={expenses.length} hint="Записей в журнале" icon="▤"/>
+        <StatCard label="Средний расход" value={money(average)} hint="На одну запись" icon="◷"/>
+      </section>
+
+      <div className="content-grid">
+        <div className="left-column">
+          <ExpenseForm onAdd={addExpense} advanced={advanced}/>
+          {hard && <section className="panel budget-panel">
+            <div className="panel-heading"><div><p className="eyebrow">ФИНАНСОВАЯ ЦЕЛЬ</p><h2>Контроль бюджета</h2></div><span className="heading-icon">◎</span></div>
+            <label>Лимит на расходы, ₸<input type="number" min="1" value={budget} onChange={e => setBudget(Math.max(1, Number(e.target.value) || 1))}/></label>
+            <div className="budget-meta"><span>Использовано</span><strong>{Math.round(percent)}%</strong></div>
+            <div className="progress"><i style={{width: percent + "%"}}></i></div>
+            <small className={total > budget ? "error" : "muted"}>{total > budget ? "Лимит превышен!" : `Осталось ${money(budget-total)}`}</small>
+          </section>}
+          <section className="level-note">
+            <span className="note-icon">✦</span><div><strong>{hard ? "Высокий уровень" : advanced ? "Средний уровень" : "Лёгкий уровень"}</strong>
+            <p>{hard ? "Добавлены редактирование, бюджет, прогресс и сохранение данных." : advanced ? "Доступны поиск, фильтрация по категориям и сортировка расходов." : "Базовые действия: добавление и удаление расходов, подсчёт общей суммы."}</p></div>
+          </section>
+        </div>
+        <section className="panel history-panel">
+          <div className="panel-heading history-heading"><div><p className="eyebrow">УПРАВЛЕНИЕ ДАННЫМИ</p><h2>История расходов</h2></div><button className="reset-btn" onClick={resetDemo}>Сбросить демо ↺</button></div>
+          {advanced && <FilterBar search={search} onSearch={setSearch} category={category} onCategory={setCategory} sort={sort} onSort={setSort}/>}
+          <ExpenseList expenses={filtered} onDelete={deleteExpense} onEdit={editExpense} editable={hard}/>
+          <div className="list-footer"><span>Показано записей: <b>{filtered.length}</b></span><span>Всего: <b>{expenses.length}</b></span></div>
+        </section>
+      </div>
+      <footer><span>LAB 11 / REACT PROPS & STATE</span><span>Учебный проект · 2026</span></footer>
+    </main>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
